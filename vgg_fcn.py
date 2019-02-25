@@ -249,13 +249,12 @@ from torchvision.models.vgg import vgg16_bn as vgg16_bn_original
 
 class TestVggFcn(unittest.TestCase):
     def test_vgg16(self):
-        DEVICE = 'cuda'
-        model = vgg16_bn_original(True).to(DEVICE)
-        model_fcn = vgg16_bn(True).to(DEVICE)
+        model = vgg16_bn_original(True)
+        model_fcn = vgg16_bn(True)
         print(model_fcn)
 
         i,j = 1,1
-        x = torch.randn(10,3,224*i,224*j).to(DEVICE)
+        x = torch.randn(10,3,224*i,224*j)
         model.eval()
         model_fcn.eval()
         with torch.no_grad():
