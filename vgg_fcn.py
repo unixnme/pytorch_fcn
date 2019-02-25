@@ -25,23 +25,20 @@ class VGG(nn.Module):
     def __init__(self, features, num_classes=1000, init_weights=True):
         super(VGG, self).__init__()
         self.features = features
-        self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
         self.classifier = nn.Sequential(
-            nn.Linear(512 * 7 * 7, 4096),
+            nn.Conv2d(512, 4096, kernel_size=7),
             nn.ReLU(True),
             nn.Dropout(),
-            nn.Linear(4096, 4096),
+            nn.Conv2d(4096, 4096, kernel_size=1),
             nn.ReLU(True),
             nn.Dropout(),
-            nn.Linear(4096, num_classes),
+            nn.Conv2d(4096, 1000, kernel_size=1),
         )
         if init_weights:
             self._initialize_weights()
 
     def forward(self, x):
         x = self.features(x)
-        x = self.avgpool(x)
-        x = x.view(x.size(0), -1)
         x = self.classifier(x)
         return x
 
@@ -57,6 +54,58 @@ class VGG(nn.Module):
             elif isinstance(m, nn.Linear):
                 nn.init.normal_(m.weight, 0, 0.01)
                 nn.init.constant_(m.bias, 0)
+
+    def load_state_dict(self, state_dict, strict=True):
+        r"""Copies parameters and buffers from :attr:`state_dict` into
+        this module and its descendants. If :attr:`strict` is ``True``, then
+        the keys of :attr:`state_dict` must exactly match the keys returned
+        by this module's :meth:`~torch.nn.Module.state_dict` function.
+
+        Arguments:
+            state_dict (dict): a dict containing parameters and
+                persistent buffers.
+            strict (bool, optional): whether to strictly enforce that the keys
+                in :attr:`state_dict` match the keys returned by this module's
+                :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
+        """
+        missing_keys = []
+        unexpected_keys = []
+        error_msgs = []
+
+        # copy state_dict so _load_from_state_dict can modify it
+        metadata = getattr(state_dict, '_metadata', None)
+        state_dict = state_dict.copy()
+
+        for k,v in state_dict.items():
+            if 'classifier' in k and 'weight' in k:
+                state_dict[k] = state_dict[k].view(self.state_dict()[k].shape)
+        if metadata is not None:
+            state_dict._metadata = metadata
+
+        def load(module, prefix=''):
+            local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+            module._load_from_state_dict(
+                state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+            for name, child in module._modules.items():
+                if child is not None:
+                    load(child, prefix + name + '.')
+
+        load(self)
+
+        if strict:
+            error_msg = ''
+            if len(unexpected_keys) > 0:
+                error_msgs.insert(
+                    0, 'Unexpected key(s) in state_dict: {}. '.format(
+                        ', '.join('"{}"'.format(k) for k in unexpected_keys)))
+            if len(missing_keys) > 0:
+                error_msgs.insert(
+                    0, 'Missing key(s) in state_dict: {}. '.format(
+                        ', '.join('"{}"'.format(k) for k in missing_keys)))
+
+        if len(error_msgs) > 0:
+            raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+                               self.__class__.__name__, "\n\t".join(error_msgs)))
 
 
 def make_layers(cfg, batch_norm=False):
@@ -194,7 +243,28 @@ def vgg19_bn(pretrained=False, **kwargs):
         model.load_state_dict(model_zoo.load_url(model_urls['vgg19_bn']))
     return model
 
+import unittest
+import torch
+from torchvision.models.vgg import vgg16_bn as vgg16_bn_original
+
+class TestVggFcn(unittest.TestCase):
+    def test_vgg16(self):
+        DEVICE = 'cuda'
+        model = vgg16_bn_original(True).to(DEVICE)
+        model_fcn = vgg16_bn(True).to(DEVICE)
+        print(model_fcn)
+
+        i,j = 1,1
+        x = torch.randn(10,3,224*i,224*j).to(DEVICE)
+        model.eval()
+        model_fcn.eval()
+        with torch.no_grad():
+            y = model(x).view(-1)
+            y_fcn = model_fcn(x).view(-1)
+
+        diff = y - y_fcn
+        self.assertTrue(torch.all(torch.abs(diff) < 2e-5))
+
 
 if __name__ == '__main__':
-    model = vgg16_bn(True)
-    print(model)
+    unittest.main()
